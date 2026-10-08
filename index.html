@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GestureBloom</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Landing screen: browsers only allow camera access after a user click -->
+  <div id="landing">
+    <h1>GestureBloom</h1>
+    <p>Grow flowers with your hands.</p>
+    <button id="startBtn">Start camera</button>
+    <p class="note">Your camera never leaves your browser.</p>
+  </div>
+
+  <!-- Hidden video element: just the raw camera source -->
+  <video id="video" playsinline muted></video>
+  <!-- Everything you see is drawn on this canvas -->
+  <canvas id="canvas"></canvas>
+
+  <script src="main.js"></script>
+</body>
+</html>
