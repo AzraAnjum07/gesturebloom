@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Flower test</title>
+  <style>
+    body { margin: 0; background: #1b1b2f; color: #fff; font-family: system-ui, sans-serif; text-align: center; }
+    canvas { display: block; margin: 0 auto; }
+    button { margin: 12px 6px; padding: 8px 20px; border: none; border-radius: 999px; background: #ff8fb1; font-size: 1rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <button id="again">Regenerate</button>
+  <button id="bg">Toggle background</button>
+  <canvas id="c" width="1100" height="570"></canvas>
+
+  <script type="module">
+    import { buildLibrary, drawSprite } from "./flowers.js";
+
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+
+    function render() {
+      const lib = buildLibrary();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // dy shifts leaves down a bit, since they grow upward from their centre
+      const all = [
+        ...lib.flowers.map((s) => ({ s, dy: 0 })),
+        ...lib.leaves.map((s) => ({ s, dy: 20 })),
+        ...lib.fillers.map((s) => ({ s, dy: 0 })),
+      ];
+
+      const cols = 12, cell = 90;
+      all.forEach(({ s, dy }, i) => {
+        const x = 55 + (i % cols) * cell;
+        const y = 55 + Math.floor(i / cols) * cell + dy;
+        drawSprite(ctx, s, x, y, cell);
+      });
+    }
+
+    document.getElementById("again").onclick = render;
+    document.getElementById("bg").onclick = () => {
+      const dark = document.body.style.background !== "rgb(242, 233, 228)";
+      document.body.style.background = dark ? "#f2e9e4" : "#1b1b2f";
+    };
+    render();
+  </script>
+</body>
+</html>
