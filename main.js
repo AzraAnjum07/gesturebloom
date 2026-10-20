@@ -11,6 +11,12 @@ const ctx = canvas.getContext("2d");
 const landing = document.getElementById("landing");
 const startBtn = document.getElementById("startBtn");
 const status = document.getElementById("status");
+const toolbar = document.getElementById("toolbar");
+const backdropBtn = document.getElementById("backdropBtn");
+const petalsBtn = document.getElementById("petalsBtn");
+const skeletonBtn = document.getElementById("skeletonBtn");
+const photoBtn = document.getElementById("photoBtn");
+const recordBtn = document.getElementById("recordBtn");
 
 let handLandmarker = null;
 let lastVideoTime = -1;
@@ -71,6 +77,7 @@ modelPromise.catch(() => {}); // errors are handled in start()
 // ---------- Start button ----------
 async function start() {
   startBtn.disabled = true;
+  status.classList.add("loading");
   try {
     status.textContent = "Asking for camera...";
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -80,13 +87,15 @@ async function start() {
     video.srcObject = stream;
     await video.play();
 
-    status.textContent = "Getting hand tracking ready...";
+    status.textContent = "Planting seeds...";
     handLandmarker = await modelPromise;
 
     landing.classList.add("hidden");
+    toolbar.classList.remove("hidden");
     requestAnimationFrame(loop);
   } catch (err) {
     console.error(err);
+    status.classList.remove("loading");
     status.textContent = "Something went wrong: " + err.message;
     startBtn.disabled = false;
   }
@@ -183,6 +192,7 @@ const garden = [];               // flowers that are still blooming (newest last
 const placed = [];               // flowers that finished blooming (kept so we can scatter them)
 const particles = [];            // flowers currently flying away
 const ghosts = [];               // frozen snapshots of the garden that fade out during a scatter
+const sparkles = [];             // little twinkles that appear as flowers bloom
 const pens = {};                 // per-hand: smoothed fingertip + last planting spot
 const holds = {};                // per-hand: open-palm hold timers
 
@@ -190,6 +200,7 @@ const BLOOM_MS = 650;            // how long a flower takes to bloom
 const HOLD_MS = 450;             // how long to hold an open hand before erasing
 const GHOST_MS = 200;            // how fast the still image of the old garden fades
 const MAX_PLACED = 1500;         // most flowers we keep individually for scattering
+const MAX_SPARKLES = 120;
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -201,6 +212,24 @@ function flowerBase() {
 
 function plant(sprite, x, y, size, rotation) {
   garden.push({ sprite, x, y, size, rotation, born: performance.now() });
+}
+
+// A couple of twinkles around a freshly planted flower
+function addSparkles(x, y, size) {
+  const now = performance.now();
+  for (let i = 0; i < 2; i++) {
+    const a = rand(0, Math.PI * 2);
+    const r = rand(size * 0.2, size * 0.55);
+    sparkles.push({
+      x: x + Math.cos(a) * r,
+      y: y + Math.sin(a) * r,
+      size: rand(6, 12),
+      born: now,
+      delay: rand(150, 450), // twinkle just after the bloom pops
+      life: rand(500, 850),
+    });
+  }
+  if (sparkles.length > MAX_SPARKLES) sparkles.splice(0, sparkles.length - MAX_SPARKLES);
 }
 
 // One bouquet cluster: maybe a filler and a leaf behind, then the main flower on top.
@@ -216,7 +245,11 @@ function plantCluster(x, y) {
   if (Math.random() < 0.4) {
     plant(pick(library.leaves), ...at(), base * rand(0.9, 1.3), rand(0, Math.PI * 2));
   }
-  plant(pick(library.flowers), ...at(), base * rand(0.75, 1.3), rand(0, Math.PI * 2));
+
+  const [fx, fy] = at();
+  const fs = base * rand(0.75, 1.3);
+  plant(pick(library.flowers), fx, fy, fs, rand(0, Math.PI * 2));
+  if (Math.random() < 0.4) addSparkles(fx, fy, fs);
 }
 
 // Runs every frame: plants along the fingertip path of every hand that is pointing
@@ -310,6 +343,42 @@ function drawGarden(now) {
   }
 }
 
+// ---------- Sparkles ----------
+function drawSparkles(now) {
+  let alive = 0;
+  for (const s of sparkles) {
+    const age = now - s.born - s.delay;
+    if (age >= s.life) continue; // finished
+    if (age >= 0) {
+      const t = age / s.life;
+      const a = Math.sin(t * Math.PI);   // fades in, then out
+      const r = s.size * (0.6 + 0.4 * a);
+
+      ctx.save();
+      ctx.translate(s.x, s.y - t * 10);   // drifts up a touch
+      ctx.rotate(t * 1.2);
+      ctx.globalAlpha = a;
+      ctx.shadowColor = "#ffd86b";
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = "#fff7d1";
+      ctx.strokeStyle = "rgba(255, 190, 70, 0.9)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {      // four-pointed star
+        const ang = (i * Math.PI) / 4;
+        const rad = i % 2 === 0 ? r : r * 0.28;
+        ctx.lineTo(Math.cos(ang) * rad, Math.sin(ang) * rad);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    sparkles[alive++] = s;
+  }
+  sparkles.length = alive;
+}
+
 // ---------- Scatter (erase) ----------
 // Every flower becomes a particle that flies away from `origin` (the palm) and fades
 function scatterGarden(origin) {
@@ -383,12 +452,12 @@ function drawRing(x, y, progress) {
   ctx.lineWidth = 7;
   ctx.lineCap = "round";
 
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.35)"; // faint full circle
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.55)"; // faint full circle
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.strokeStyle = "#ff8fb1"; // the filling part
+  ctx.strokeStyle = "#f26a98"; // the filling part
   ctx.beginPath();
   ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
   ctx.stroke();
@@ -428,11 +497,6 @@ function updateErase(rect, now) {
   }
 }
 
-// TEMPORARY test aid: press "c" to scatter from the middle of the screen
-window.addEventListener("keydown", (e) => {
-  if (e.key === "c") scatterGarden(null);
-});
-
 // ---------- Detection ----------
 function detect() {
   // Only run the model when the camera has a new frame
@@ -442,7 +506,19 @@ function detect() {
   updateGestures(result);
 }
 
-// ---------- Drawing ----------
+// ---------- Backdrops ----------
+// video: how visible the camera is (0 = hidden). stops: optional gradient behind it.
+const BACKDROPS = [
+  { name: "Camera", video: 1 },
+  { name: "Dreamy", video: 0.4, stops: ["#ffe4ec", "#fff1e6", "#e7e0ff"] },
+  { name: "Pastel", video: 0, stops: ["#ffe4ec", "#fff1e6", "#e7e0ff"] },
+  { name: "Dusk", video: 0, stops: ["#ffd9c7", "#f6a5c0", "#6b5b9a"] },
+  { name: "Night", video: 0, stops: ["#12122a", "#221538", "#33204a"] },
+];
+let backdropIndex = 0;
+let showSkeleton = true;
+let showPetals = true;
+
 function drawVideo(rect) {
   ctx.save();
   ctx.translate(canvas.width, 0);
@@ -451,18 +527,131 @@ function drawVideo(rect) {
   ctx.restore();
 }
 
+function drawBackdrop(rect) {
+  const backdrop = BACKDROPS[backdropIndex];
+
+  if (backdrop.stops) {
+    const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    g.addColorStop(0, backdrop.stops[0]);
+    g.addColorStop(0.5, backdrop.stops[1]);
+    g.addColorStop(1, backdrop.stops[2]);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  if (backdrop.video > 0) {
+    ctx.globalAlpha = backdrop.video;
+    drawVideo(rect);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------- Ambient petals ----------
+const PETAL_COUNT = 26;
+const PETAL_COLORS = ["#ffb7c9", "#ffd3e0", "#fff0f5", "#f9c6e0", "#e8d5ff"];
+let petals = [];
+
+function newPetal(anywhere) {
+  return {
+    x: rand(0, canvas.width),
+    y: anywhere ? rand(0, canvas.height) : rand(-60, -10),
+    size: rand(8, 17),
+    speed: rand(20, 45),     // fall speed, px/s
+    sway: rand(0.6, 1.6),    // sway frequency
+    swayAmp: rand(18, 45),   // sway strength
+    phase: rand(0, Math.PI * 2),
+    rot: rand(0, Math.PI * 2),
+    spin: rand(-1.2, 1.2),
+    color: pick(PETAL_COLORS),
+  };
+}
+
+function drawPetals(now, dt) {
+  if (petals.length === 0) {
+    petals = Array.from({ length: PETAL_COUNT }, () => newPetal(true));
+  }
+  const k = Math.min(canvas.width, canvas.height) / 720;
+
+  for (let i = 0; i < petals.length; i++) {
+    const p = petals[i];
+    p.y += p.speed * k * dt;
+    p.x += Math.sin((now / 1000) * p.sway + p.phase) * p.swayAmp * dt;
+    p.rot += p.spin * dt;
+    if (p.y > canvas.height + 30) {
+      petals[i] = newPetal(false);
+      continue;
+    }
+
+    const flip = 0.4 + 0.6 * Math.abs(Math.cos(p.rot * 0.9 + p.phase)); // tumbling look
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.scale(1, flip);
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, p.size * k, p.size * 0.55 * k, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ---------- Vignette + film grain ----------
+const grainCanvas = document.createElement("canvas");
+grainCanvas.width = grainCanvas.height = 128;
+{
+  const g = grainCanvas.getContext("2d");
+  const img = g.createImageData(128, 128);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.random() * 255;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255; // opaque grey noise, faded when drawn
+  }
+  g.putImageData(img, 0, 0);
+}
+let grainPattern = null;
+
+function drawFinish() {
+  // Soft plum vignette
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const r = Math.hypot(cx, cy);
+  const vg = ctx.createRadialGradient(cx, cy, r * 0.55, cx, cy, r);
+  vg.addColorStop(0, "rgba(70, 25, 80, 0)");
+  vg.addColorStop(1, "rgba(70, 25, 80, 0.22)");
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Grain: the noise tile jumps to a random offset every frame so it shimmers
+  grainPattern ??= ctx.createPattern(grainCanvas, "repeat");
+  ctx.save();
+  ctx.globalAlpha = 0.05;
+  ctx.globalCompositeOperation = "overlay";
+  ctx.translate(Math.random() * 128, Math.random() * 128);
+  ctx.fillStyle = grainPattern;
+  ctx.fillRect(-128, -128, canvas.width + 128, canvas.height + 128);
+  ctx.restore();
+}
+
+// ---------- Skeleton ----------
 function drawHands(rect) {
   for (const hand of hands) {
     const pts = hand.landmarks.map((lm) => toCanvas(lm, rect));
 
-    // Bones
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-    ctx.lineWidth = 3;
-    for (const { start, end } of HandLandmarker.HAND_CONNECTIONS) {
-      ctx.beginPath();
-      ctx.moveTo(pts[start].x, pts[start].y);
-      ctx.lineTo(pts[end].x, pts[end].y);
-      ctx.stroke();
+    // Bones: soft dark outline first so they stay visible on light backdrops
+    ctx.lineCap = "round";
+    for (const [width, color] of [
+      [6, "rgba(91, 58, 94, 0.35)"],
+      [3, "rgba(255, 255, 255, 0.95)"],
+    ]) {
+      ctx.lineWidth = width;
+      ctx.strokeStyle = color;
+      for (const { start, end } of HandLandmarker.HAND_CONNECTIONS) {
+        ctx.beginPath();
+        ctx.moveTo(pts[start].x, pts[start].y);
+        ctx.lineTo(pts[end].x, pts[end].y);
+        ctx.stroke();
+      }
     }
 
     // Joints
@@ -474,12 +663,116 @@ function drawHands(rect) {
     }
 
     // Gesture label near the wrist
+    ctx.font = "700 20px Quicksand, system-ui, sans-serif";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "rgba(91, 58, 94, 0.6)";
+    ctx.strokeText(hand.gesture, pts[0].x - 20, pts[0].y + 32);
     ctx.fillStyle = "#fff";
-    ctx.font = "20px system-ui";
     ctx.fillText(hand.gesture, pts[0].x - 20, pts[0].y + 32);
   }
 }
 
+// ---------- Toolbar: backdrop, petals, skeleton, photo, record ----------
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function stamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+}
+
+backdropBtn.addEventListener("click", () => {
+  backdropIndex = (backdropIndex + 1) % BACKDROPS.length;
+  backdropBtn.textContent = "🎨 Backdrop: " + BACKDROPS[backdropIndex].name;
+});
+
+petalsBtn.addEventListener("click", () => {
+  showPetals = !showPetals;
+  petalsBtn.textContent = "🌸 Petals: " + (showPetals ? "On" : "Off");
+});
+
+skeletonBtn.addEventListener("click", () => {
+  showSkeleton = !showSkeleton;
+  skeletonBtn.textContent = "🖐 Skeleton: " + (showSkeleton ? "On" : "Off");
+});
+
+photoBtn.addEventListener("click", () => {
+  // The canvas holds the last finished frame, so this saves exactly what you see
+  canvas.toBlob((blob) => {
+    if (blob) download(blob, `gesturebloom-${stamp()}.png`);
+  }, "image/png");
+});
+
+// Video recording (records the canvas, not the buttons)
+let recorder = null;
+let recordedChunks = [];
+let recordTimer = null;
+
+function pickMimeType() {
+  const types = [
+    "video/mp4;codecs=avc1",
+    "video/mp4",
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  return types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+}
+
+function startRecording() {
+  const mimeType = pickMimeType();
+  const stream = canvas.captureStream(30);
+  recorder = new MediaRecorder(
+    stream,
+    mimeType ? { mimeType, videoBitsPerSecond: 6000000 } : undefined
+  );
+  recordedChunks = [];
+
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+  recorder.onstop = () => {
+    const type = recorder.mimeType || mimeType || "video/webm";
+    const blob = new Blob(recordedChunks, { type });
+    download(blob, `gesturebloom-${stamp()}.${type.includes("mp4") ? "mp4" : "webm"}`);
+    recorder = null;
+  };
+  recorder.start();
+
+  // Button turns red and shows a running timer
+  const startedAt = performance.now();
+  recordBtn.classList.add("recording");
+  recordBtn.textContent = "⏹ Stop 0:00";
+  recordTimer = setInterval(() => {
+    const s = Math.floor((performance.now() - startedAt) / 1000);
+    recordBtn.textContent = `⏹ Stop ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }, 500);
+}
+
+function stopRecording() {
+  clearInterval(recordTimer);
+  recordBtn.classList.remove("recording");
+  recordBtn.textContent = "⏺ Record";
+  if (recorder && recorder.state !== "inactive") recorder.stop();
+}
+
+if (typeof MediaRecorder === "undefined") {
+  recordBtn.style.display = "none"; // browser can't record, so hide the button
+} else {
+  recordBtn.addEventListener("click", () => {
+    if (recorder) stopRecording();
+    else startRecording();
+  });
+}
+
+// ---------- Main loop ----------
 let lastFrame = performance.now();
 
 function loop() {
@@ -490,17 +783,16 @@ function loop() {
   detect();
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const rect = getVideoRect();
-  drawVideo(rect);
+
+  drawBackdrop(rect);
+  if (showPetals) drawPetals(now, dt);
   updatePlanting(rect);
   drawGarden(now);
   drawParticles(now, dt);
-  drawHands(rect);
+  drawSparkles(now);
+  drawFinish();
+  if (showSkeleton) drawHands(rect);
   updateErase(rect, now);
-
-  // Temporary debug text (we'll remove it later)
-  ctx.fillStyle = "#fff";
-  ctx.font = "16px system-ui";
-  ctx.fillText(`Hands: ${hands.length}   Flowers: ${placed.length + garden.length}`, 16, 28);
 
   requestAnimationFrame(loop);
 }
